@@ -1,9 +1,49 @@
+// Завантажуємо environment variables
+require('dotenv').config();
+
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
+const helmet = require('helmet');
 const app = express();
 const PORT = process.env.PORT || 3002;
+
+// Функція для логування безпеки
+function logSecurityEvent(event, details, req = null) {
+  const timestamp = new Date().toISOString();
+  const ip = req ? req.ip || req.connection.remoteAddress : 'unknown';
+  const userAgent = req ? req.headers['user-agent'] : 'unknown';
+  
+  const logEntry = {
+    timestamp,
+    event,
+    details,
+    ip,
+    userAgent,
+    severity: details.severity || 'info'
+  };
+  
+  console.log(`🔒 SECURITY [${logEntry.severity.toUpperCase()}] ${event}:`, logEntry);
+  
+  // В продакшені можна додати запис в файл або відправку в систему моніторингу
+  if (process.env.NODE_ENV === 'production') {
+    // Тут можна додати запис в файл логів
+    const fs = require('fs');
+    const path = require('path');
+    const logFile = path.join(__dirname, 'logs', 'security.log');
+    
+    try {
+      if (!fs.existsSync(path.dirname(logFile))) {
+        fs.mkdirSync(path.dirname(logFile), { recursive: true });
+      }
+      fs.appendFileSync(logFile, JSON.stringify(logEntry) + '\n');
+    } catch (error) {
+      console.error('❌ Error writing security log:', error);
+    }
+  }
+}
 
 // Функція для оновлення списку активних користувачів
 function updateActiveUsers(userAddress) {
@@ -30,53 +70,62 @@ function updateActiveUsers(userAddress) {
   }
 }
 
-// Middleware для CORS - дозволяємо всі домени для мобільних пристроїв
+// Застосовуємо Helmet для безпеки
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", "https://api.binance.com", "https://defi-exchange-202510151704.onrender.com"],
+      fontSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      mediaSrc: ["'self'"],
+      frameSrc: ["'none'"],
+    },
+  },
+  crossOriginEmbedderPolicy: false
+}));
+
+// Застосовуємо загальний rate limiting
+app.use(generalLimiter);
+
+// Middleware для CORS - безпечні налаштування
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+  ? process.env.ALLOWED_ORIGINS.split(',')
+  : [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'https://defi-exchange-202510151704.onrender.com',
+      'https://defi-exchange-render.onrender.com'
+    ];
+
 app.use(cors({
   origin: function (origin, callback) {
-    // Дозволяємо запити без origin (мобільні пристрої, Postman, тощо)
-    if (!origin) return callback(null, true);
+    // В продакшені не дозволяємо запити без origin
+    if (process.env.NODE_ENV === 'production' && !origin) {
+      console.log('🚫 CORS blocked: No origin in production');
+      return callback(new Error('Origin required in production'), false);
+    }
     
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:3001',
-  'https://defi-exchange-202510151704.onrender.com',
-  'https://defi-exchange-render.onrender.com',
-  'http://91.196.34.246',
-  'https://91.196.34.246',
-  'http://144.31.189.82',
-  'https://144.31.189.82',
-  'http://id635272.com',
-  'https://id635272.com',
-  // Додаємо підтримку для Vercel та інших хостингів
-  /^https:\/\/.*\.vercel\.app$/,
-  /^https:\/\/.*\.netlify\.app$/,
-  /^https:\/\/.*\.github\.io$/,
-  // Додаємо підтримку для мобільних пристроїв
-  /^https:\/\/.*\.onrender\.com$/,
-  /^https:\/\/.*\.herokuapp\.com$/
-];
+    // В development дозволяємо запити без origin (для тестування)
+    if (process.env.NODE_ENV !== 'production' && !origin) {
+      return callback(null, true);
+    }
     
-    // Перевіряємо чи origin дозволений
-    const isAllowed = allowedOrigins.some(allowedOrigin => {
-      if (typeof allowedOrigin === 'string') {
-        return origin === allowedOrigin;
-      } else if (allowedOrigin instanceof RegExp) {
-        return allowedOrigin.test(origin);
-      }
-      return false;
-    });
-    
-    if (isAllowed) {
+    if (allowedOrigins.includes(origin)) {
       console.log('✅ CORS: Allowed origin:', origin);
       callback(null, true);
     } else {
-      console.log('🔍 CORS: Allowing origin (fallback):', origin);
-      callback(null, true); // Дозволяємо всі для мобільних пристроїв
+      console.log('🚫 CORS blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  maxAge: 86400 // 24 години
 }));
 
 // Додаткові CORS заголовки для всіх запитів
@@ -192,7 +241,7 @@ app.get('/test-bot-connection', async (req, res) => {
 });
 
 // API для синхронізації балансів між пристроями
-app.post('/api/sync-balances', (req, res) => {
+app.post('/api/sync-balances', apiLimiter, (req, res) => {
   try {
     const { userAddress, balances } = req.body;
     
@@ -410,6 +459,53 @@ function isValidAmount(amount) {
 const requestCache = new Map();
 const CACHE_DURATION = 5000; // 5 секунд
 
+// Rate Limiting Configuration
+const generalLimiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 хвилин
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // максимум 100 запитів на IP
+  message: {
+    success: false,
+    error: 'Too many requests',
+    message: 'Забагато запитів. Спробуйте пізніше.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  onLimitReached: (req, res, options) => {
+    logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+      endpoint: req.path,
+      severity: 'warning'
+    }, req);
+  }
+});
+
+// Строгий rate limiting для API endpoints
+const apiLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 хвилин
+  max: 50, // максимум 50 запитів на IP
+  message: {
+    success: false,
+    error: 'API rate limit exceeded',
+    message: 'Перевищено ліміт API запитів. Спробуйте пізніше.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Дуже строгий rate limiting для withdrawal requests
+const withdrawalLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 хвилина
+  max: 5, // максимум 5 запитів на хвилину
+  message: {
+    success: false,
+    error: 'Withdrawal rate limit exceeded',
+    message: 'Перевищено ліміт запитів на виведення. Зачекайте хвилину.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Middleware для запобігання дублюванню запитів
 function preventDuplicateRequests(req, res, next) {
   const { token, amount, address, userAddress } = req.body;
@@ -443,7 +539,7 @@ function preventDuplicateRequests(req, res, next) {
 }
 
 // Проксі для заявок на вивід до Telegram бота
-app.post('/withdrawal-request', preventDuplicateRequests, async (req, res) => {
+app.post('/withdrawal-request', withdrawalLimiter, preventDuplicateRequests, async (req, res) => {
   try {
     console.log('🔄 Proxying withdrawal request to Telegram bot...');
     console.log('📊 Request data:', req.body);
@@ -460,15 +556,22 @@ app.post('/withdrawal-request', preventDuplicateRequests, async (req, res) => {
       });
     }
     
-    // Валідація адреси отримувача
-    if (!isValidEthereumAddress(address)) {
-      console.error('❌ Invalid recipient address:', address);
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Invalid recipient address',
-        message: 'Некоректна адреса отримувача. Адреса повинна починатися з 0x та містити 40 символів'
-      });
-    }
+        // Валідація адреси отримувача
+        if (!isValidEthereumAddress(address)) {
+          console.error('❌ Invalid recipient address:', address);
+          logSecurityEvent('INVALID_ADDRESS_ATTEMPT', {
+            address,
+            userAddress,
+            token,
+            amount,
+            severity: 'warning'
+          }, req);
+          return res.status(400).json({ 
+            success: false, 
+            error: 'Invalid recipient address',
+            message: 'Некоректна адреса отримувача. Адреса повинна починатися з 0x та містити 40 символів'
+          });
+        }
     
     // Валідація адреси користувача
     if (!isValidEthereumAddress(userAddress)) {

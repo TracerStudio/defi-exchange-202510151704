@@ -1,10 +1,24 @@
+// Завантажуємо environment variables
+require('dotenv').config();
+
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 const app = express();
 
-// Telegram Bot Token (заміни на свій токен)
-const BOT_TOKEN = '7769270215:AAH_R-Q14oxkKHU0a53xK4_evXWiQJBiO54'; // ID адміна для отримання заявок
-const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '-1002573326301'; // Можна змінити через змінну середовища
+// Telegram Bot Configuration - використовуємо environment variables
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
+
+// Перевіряємо наявність обов'язкових змінних
+if (!BOT_TOKEN) {
+  console.error('❌ TELEGRAM_BOT_TOKEN не встановлено в environment variables');
+  process.exit(1);
+}
+
+if (!ADMIN_CHAT_ID) {
+  console.error('❌ ADMIN_CHAT_ID не встановлено в environment variables');
+  process.exit(1);
+}
 
 // Створюємо бота
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
