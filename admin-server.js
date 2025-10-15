@@ -137,27 +137,35 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
       'http://localhost:3000',
       'http://localhost:3001',
       'https://defi-exchange-202510151704.onrender.com',
-      'https://defi-exchange-render.onrender.com'
+      'https://defi-exchange-render.onrender.com',
+      // Додаємо підтримку для різних хостингів
+      'https://defi-exchange-202510151704.onrender.com',
+      'https://defi-exchange-render.onrender.com',
+      // Підтримка для мобільних додатків та тестування
+      'capacitor://localhost',
+      'ionic://localhost',
+      'http://localhost',
+      'https://localhost'
     ];
 
 app.use(cors({
   origin: function (origin, callback) {
-    // В продакшені не дозволяємо запити без origin
-    if (process.env.NODE_ENV === 'production' && !origin) {
-      console.log('🚫 CORS blocked: No origin in production');
-      return callback(new Error('Origin required in production'), false);
-    }
+    // Логуємо всі запити для діагностики
+    console.log('🌐 CORS request from origin:', origin || 'no-origin');
     
-    // В development дозволяємо запити без origin (для тестування)
-    if (process.env.NODE_ENV !== 'production' && !origin) {
+    // Дозволяємо запити без origin (мобільні додатки, Postman, серверні виклики)
+    if (!origin) {
+      console.log('✅ CORS: Allowing request without origin (mobile/server)');
       return callback(null, true);
     }
     
+    // Перевіряємо чи origin в списку дозволених
     if (allowedOrigins.includes(origin)) {
       console.log('✅ CORS: Allowed origin:', origin);
       callback(null, true);
     } else {
       console.log('🚫 CORS blocked origin:', origin);
+      console.log('📋 Allowed origins:', allowedOrigins);
       callback(new Error('Not allowed by CORS'));
     }
   },
