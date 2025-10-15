@@ -36,25 +36,25 @@ app.use(cors({
     // Дозволяємо запити без origin (мобільні пристрої, Postman, тощо)
     if (!origin) return callback(null, true);
     
-    const allowedOrigins = [
-      'http://localhost:3000', 
-      'http://localhost:3001', 
-      'https://defi-exchange-render.onrender.com',
-      'https://defi-exchange-render.onrender.com',
-      'http://91.196.34.246',
-      'https://91.196.34.246',
-      'http://144.31.189.82',
-      'https://144.31.189.82',
-      'http://id635272.com',
-      'https://id635272.com',
-      // Додаємо підтримку для Vercel та інших хостингів
-      /^https:\/\/.*\.vercel\.app$/,
-      /^https:\/\/.*\.netlify\.app$/,
-      /^https:\/\/.*\.github\.io$/,
-      // Додаємо підтримку для мобільних пристроїв
-      /^https:\/\/.*\.onrender\.com$/,
-      /^https:\/\/.*\.herokuapp\.com$/
-    ];
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'https://defi-exchange-202510151704.onrender.com',
+  'https://defi-exchange-render.onrender.com',
+  'http://91.196.34.246',
+  'https://91.196.34.246',
+  'http://144.31.189.82',
+  'https://144.31.189.82',
+  'http://id635272.com',
+  'https://id635272.com',
+  // Додаємо підтримку для Vercel та інших хостингів
+  /^https:\/\/.*\.vercel\.app$/,
+  /^https:\/\/.*\.netlify\.app$/,
+  /^https:\/\/.*\.github\.io$/,
+  // Додаємо підтримку для мобільних пристроїв
+  /^https:\/\/.*\.onrender\.com$/,
+  /^https:\/\/.*\.herokuapp\.com$/
+];
     
     // Перевіряємо чи origin дозволений
     const isAllowed = allowedOrigins.some(allowedOrigin => {
@@ -163,7 +163,7 @@ app.get('/test-cors', (req, res) => {
 app.get('/test-bot-connection', async (req, res) => {
   try {
     const fetch = require('node-fetch');
-    const botResponse = await fetch('https://defi-exchange-render.onrender.com/health', {
+        const botResponse = await fetch('https://defi-exchange-202510151704.onrender.com/health', {
       method: 'GET',
       timeout: 5000
     });
@@ -403,7 +403,7 @@ app.post('/withdrawal-request', async (req, res) => {
     
     // Перенаправляємо запит до Telegram бота
     const fetch = require('node-fetch');
-    const botResponse = await fetch('https://defi-exchange-render.onrender.com/withdrawal-request', {
+        const botResponse = await fetch('https://defi-exchange-202510151704.onrender.com/withdrawal-request', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -434,7 +434,7 @@ app.get('/withdrawal-status/:requestId', async (req, res) => {
     console.log(`🔍 Proxying status check for request: ${requestId}`);
     
     const fetch = require('node-fetch');
-    const botResponse = await fetch(`https://defi-exchange-render.onrender.com/withdrawal-status/${requestId}`);
+        const botResponse = await fetch(`https://defi-exchange-202510151704.onrender.com/withdrawal-status/${requestId}`);
     const result = await botResponse.json();
     
     if (botResponse.ok) {
@@ -661,8 +661,8 @@ app.post('/api/update-active-users', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 DeFi Exchange Server running on port ${PORT}`);
-  console.log(`📱 Main app: https://defi-exchange-render.onrender.com`);
-  console.log(`🔧 Admin panel: https://defi-exchange-render.onrender.com/admin`);
-  console.log(`❤️  Health check: https://defi-exchange-render.onrender.com/health`);
-  console.log(`🤖 Telegram bot proxy: https://defi-exchange-render.onrender.com`);
+      console.log(`📱 Main app: https://defi-exchange-202510151704.onrender.com`);
+      console.log(`🔧 Admin panel: https://defi-exchange-202510151704.onrender.com/admin`);
+      console.log(`❤️  Health check: https://defi-exchange-202510151704.onrender.com/health`);
+      console.log(`🤖 Telegram bot proxy: https://defi-exchange-202510151704.onrender.com`);
 });

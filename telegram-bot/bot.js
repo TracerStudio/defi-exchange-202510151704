@@ -525,7 +525,7 @@ app.get('/health', (req, res) => {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🤖 Telegram bot server running on port ${PORT}`);
-  console.log(`🔗 Health check: https://defi-exchange-render.onrender.com/health`);
+      console.log(`🔗 Health check: https://defi-exchange-202510151704.onrender.com/health`);
   console.log(`📱 Bot is ready! Send /start to test.`);
 });
 
