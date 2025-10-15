@@ -1,0 +1,12 @@
+{
+  "activeTab": "Swap",
+  "fromToken": "ETH",
+  "toToken": "USDT",
+  "fromAmount": "",
+  "toAmount": "",
+  "depositAmount": "",
+  "depositToken": "USDT",
+  "withdrawAmount": "",
+  "withdrawToken": "USDT",
+  "withdrawAddress": ""
+}

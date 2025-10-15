@@ -1,0 +1,31 @@
+services:
+  # Основний веб-сервіс
+  - type: web
+    name: defi-exchange-platform
+    env: node
+    plan: free
+    buildCommand: npm install --legacy-peer-deps && npm run build
+    startCommand: npm run start:prod
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3002
+    healthCheckPath: /health
+    autoDeploy: true
+    branch: main
+    
+  # Telegram Bot сервіс (опціонально)
+  - type: worker
+    name: defi-exchange-telegram-bot
+    env: node
+    plan: free
+    buildCommand: cd telegram-bot && npm install
+    startCommand: cd telegram-bot && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+    autoDeploy: true
+    branch: main
