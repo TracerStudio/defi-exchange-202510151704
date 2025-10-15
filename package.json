@@ -9,7 +9,16 @@
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "admin": "node admin-server.js",
-    "admin:dev": "npm start"
+    "admin:dev": "npm start",
+    "bot": "cd telegram-bot && node bot.js",
+    "bot:start": "cd telegram-bot && npm start",
+    "db:init": "node scripts/start-db.js",
+    "db:start": "node scripts/start-db.js",
+    "bot:start": "node scripts/start-bot.js",
+    "dev": "concurrently \"npm run admin\" \"npm run bot\" \"npm start\"",
+    "dev:full": "concurrently \"npm run admin\" \"npm run bot\" \"npm start\" --names \"ADMIN,BOT,FRONTEND\" --prefix-colors \"blue,green,yellow\"",
+    "start:all": "node start.js",
+    "start:full": "node start.js"
   },
   "dependencies": {
     "@reown/appkit": "^1.8.9",
@@ -23,6 +32,9 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-scripts": "5.0.1"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
   },
   "browserslist": {
     "production": [
