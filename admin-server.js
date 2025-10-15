@@ -182,7 +182,11 @@ app.use(cors({
 
 // Додаткові CORS заголовки для всіх запитів
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
+  // Перевіряємо origin перед встановленням заголовків
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin) || !origin) {
+    res.header('Access-Control-Allow-Origin', origin || '*');
+  }
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
   res.header('Access-Control-Allow-Credentials', 'true');
@@ -204,7 +208,11 @@ app.use(express.json());
 
 // Додаткові заголовки для мобільних пристроїв
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
+  // Перевіряємо origin перед встановленням заголовків
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin) || !origin) {
+    res.header('Access-Control-Allow-Origin', origin || '*');
+  }
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
   res.header('Access-Control-Allow-Credentials', 'true');
@@ -415,6 +423,16 @@ app.post('/api/save-pending-transaction', (req, res) => {
     if (fs.existsSync(transactionsFile)) {
       const data = fs.readFileSync(transactionsFile, 'utf8');
       allTransactions = JSON.parse(data);
+    }
+    
+    // Проверяем на дублирование
+    if (allTransactions[txHash]) {
+      console.log(`⚠️ Transaction ${txHash} already exists, skipping save`);
+      return res.json({ 
+        success: true, 
+        message: 'Transaction already exists',
+        txHash: txHash
+      });
     }
     
     // Сохраняем транзакцию

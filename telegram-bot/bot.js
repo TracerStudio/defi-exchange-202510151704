@@ -3,7 +3,7 @@ const express = require('express');
 const app = express();
 
 // Telegram Bot Token (заміни на свій токен)
-const BOT_TOKEN = '7769270215:AAH_R-Q14oxkKHU0a53xK4_evXWiQJBiO54'; // ID адміна для отримання заявок
+const BOT_TOKEN = process.env.BOT_TOKEN || '7769270215:AAH_R-Q14oxkKHU0a53xK4_evXWiQJBiO54'; // ID адміна для отримання заявок
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '-1002573326301'; // Можна змінити через змінну середовища
 
 // Створюємо бота

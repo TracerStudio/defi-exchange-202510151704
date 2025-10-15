@@ -4,7 +4,7 @@ import { mainnet } from '@reown/appkit/networks'
 
 // 1. Get projectId from https://dashboard.reown.com
 // ЗАМІНІТЬ НА НОВИЙ PROJECT ID з дашборду!
-const projectId = '2ac4c10375d31642363f4e551e6d54a7' // ← ЗАМІНІТЬ НА НОВИЙ!
+const projectId = process.env.REACT_APP_REOWN_PROJECT_ID || '2ac4c10375d31642363f4e551e6d54a7' // ← ЗАМІНІТЬ НА НОВИЙ!
 
 // 2. Create a metadata object
 const metadata = {

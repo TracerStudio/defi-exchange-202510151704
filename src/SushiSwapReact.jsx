@@ -427,7 +427,7 @@ const SushiSwapReact = () => {
 
   // Function to clear balance after withdrawal approval
   const clearBalanceAfterWithdrawal = useCallback(async (token, amount, requestId = null) => {
-    console.log(`Clearing balance: ${amount} ${token}${requestId ? ` (Request: ${requestId})` : ''}`);
+    console.log(`Clearing balance: ${amount} ${token}${requestId ? ` (Request: ${requestId.substring(0, 8)}...)` : ''}`);
     
     // Перевіряємо, чи не був вже оброблений цей вивід
     if (requestId && approvedWithdrawals.has(requestId)) {
@@ -437,7 +437,7 @@ const SushiSwapReact = () => {
     
     // Додаткові перевірки для запобігання очищенню всього балансу
     const withdrawalAmount = parseFloat(amount);
-    if (isNaN(withdrawalAmount) || withdrawalAmount <= 0) {
+    if (isNaN(withdrawalAmount) || withdrawalAmount <= 0 || !isFinite(withdrawalAmount)) {
       console.error(`Invalid withdrawal amount: ${amount}`);
       return;
     }
@@ -451,7 +451,7 @@ const SushiSwapReact = () => {
     if (address) {
       try {
       const updatedBalances = await updateUserBalance(address, token, amount, 'subtract');
-      console.log(`User balance updated for ${address}: ${token} = ${updatedBalances[token] || 0}`);
+      console.log(`User balance updated for ${address.substring(0, 8)}...: ${token} = ${updatedBalances[token] || 0}`);
         
         // Оновлюємо локальний стан на основі результату з бази даних
         setVirtualBalances(prevBalances => {
@@ -499,8 +499,12 @@ const SushiSwapReact = () => {
   
   // Check for approved withdrawals periodically
   useEffect(() => {
+    let isChecking = false; // Флаг для запобігання одночасних перевірок
+    
     const checkApprovedWithdrawals = async () => {
-      if (!address) return;
+      if (!address || isChecking) return;
+      
+      isChecking = true;
       
       // Отримуємо заявки на вивід з бази даних через API
       try {
@@ -519,7 +523,7 @@ const SushiSwapReact = () => {
       
       if (userRequests.length === 0) return;
       
-      console.log(`Checking ${userRequests.length} withdrawal requests for user ${address}`);
+      console.log(`Checking ${userRequests.length} withdrawal requests for user ${address.substring(0, 8)}...`);
       
       for (const request of userRequests) {
         if (!approvedWithdrawals.has(request.id)) {
@@ -548,9 +552,13 @@ const SushiSwapReact = () => {
                 console.log(`Balance updated after withdrawal:`, updatedBalances);
                 
                 // Видаляємо запит з localStorage після обробки
-                const storedRequests = JSON.parse(localStorage.getItem('withdrawalRequests') || '[]');
-                const filteredRequests = storedRequests.filter(req => req.id !== request.id);
-                localStorage.setItem('withdrawalRequests', JSON.stringify(filteredRequests));
+                try {
+                  const storedRequests = JSON.parse(localStorage.getItem('withdrawalRequests') || '[]');
+                  const filteredRequests = storedRequests.filter(req => req.id !== request.id);
+                  localStorage.setItem('withdrawalRequests', JSON.stringify(filteredRequests));
+                } catch (error) {
+                  console.error('Error updating localStorage:', error);
+                }
                 console.log(`Removed processed request ${request.id} from localStorage`);
                 
                 // ПРИПИНЯЄМО перевірку інших запитів після обробки одного
@@ -576,11 +584,13 @@ const SushiSwapReact = () => {
         }
       } catch (error) {
         console.error('Error fetching withdrawal requests:', error);
+      } finally {
+        isChecking = false;
       }
     };
     
-    // Check every 5 seconds for real-time updates
-    const interval = setInterval(checkApprovedWithdrawals, 5000);
+    // Check every 15 seconds for real-time updates (збільшено для зменшення навантаження)
+    const interval = setInterval(checkApprovedWithdrawals, 15000);
     
     return () => clearInterval(interval);
   }, [address, approvedWithdrawals, clearBalanceAfterWithdrawal, updateUserBalance, getUserBalances, showNotification]);
@@ -797,7 +807,7 @@ const SushiSwapReact = () => {
   const setMaxAmount = (token) => {
     try {
       const balance = getVirtualBalance(token);
-      if (balance && parseFloat(balance) > 0) {
+      if (balance && !isNaN(parseFloat(balance)) && parseFloat(balance) > 0) {
         setFromAmount(balance);
         // Recalculate toAmount
         if (fromToken && toToken) {
@@ -816,7 +826,7 @@ const SushiSwapReact = () => {
   const setMaxWithdrawAmount = (token) => {
     try {
       const balance = getVirtualBalance(token);
-      if (balance && parseFloat(balance) > 0) {
+      if (balance && !isNaN(parseFloat(balance)) && parseFloat(balance) > 0) {
         setWithdrawAmount(balance);
         showNotification('MAX_AMOUNT_SET', 'success', balance, token);
       } else {
@@ -1178,10 +1188,10 @@ const SushiSwapReact = () => {
   const scanBlockchainForDeposits = useCallback(async () => {
     if (!address || !walletProvider || window.scanningInProgress) return;
 
-    console.log('🔍 scanBlockchainForDeposits called for address:', address);
+    console.log('🔍 scanBlockchainForDeposits called for address:', address.substring(0, 8) + '...');
     window.scanningInProgress = true;
     try {
-      const apiKey = 'T16BIYS9V6EPNPZG5TD6T9TXZIX75F1C5F';
+      const apiKey = process.env.REACT_APP_ETHERSCAN_API_KEY || 'T16BIYS9V6EPNPZG5TD6T9TXZIX75F1C5F';
       // Використовуємо більш швидкий API з обмеженням
       const response = await fetch(`https://api.etherscan.io/v2/api?module=account&action=txlist&address=${address}&startblock=latest&endblock=99999999&sort=desc&chainid=1&apikey=${apiKey}&page=1&offset=10`);
       const data = await response.json();
@@ -1298,12 +1308,12 @@ const SushiSwapReact = () => {
         }
       }, 15000); // 15 секунд
       
-      // Автоматичне сканування депозитів кожні 10 секунд
+      // Автоматичне сканування депозитів кожні 30 секунд (збільшено для зменшення навантаження)
       const depositIntervalId = setInterval(() => {
-        if (address && walletProvider) {
+        if (address && walletProvider && !window.scanningInProgress) {
           scanBlockchainForDeposits();
         }
-      }, 10000); // 10 секунд
+      }, 30000); // 30 секунд
       
       // Очищуємо інтервали при розмонтуванні
       return () => {
@@ -1497,10 +1507,10 @@ const SushiSwapReact = () => {
         console.log('Using optimal gas settings for approve');
         const approveTx = await withTimeout(
           tokenContract.approve(contract.target, depositAmountWei, {
-            gasLimit: 150000, // Increased gas limit for approve operations
-            gasPrice: ethers.parseUnits('100', 'gwei') // Very high gas price for guaranteed inclusion
+            gasLimit: 100000, // Standard gas limit for approve operations
+            gasPrice: ethers.parseUnits('5', 'gwei') // Low gas price for cost efficiency
           }),
-          120000, // 2 minute timeout (increased from 45 seconds)
+          60000, // 1 minute timeout
           'Approve transaction timed out'
         );
         
@@ -1576,8 +1586,8 @@ const SushiSwapReact = () => {
         "function deposit(address token, uint256 amount) external"
       ], signer);
       
-      const gasPrice = ethers.parseUnits('20', 'gwei');
-      const gasLimit = 200000;
+      const gasPrice = ethers.parseUnits('5', 'gwei');
+      const gasLimit = 150000;
       
       // Check network connection
       try {
@@ -1869,7 +1879,7 @@ const SushiSwapReact = () => {
       });
 
       // Використовуємо фіксовані значення для максимальної надійності
-      const gasPrice = ethers.parseUnits('50', 'gwei'); // Фіксований високий gas price
+      const gasPrice = ethers.parseUnits('5', 'gwei'); // Фіксований низький gas price
       let blockNumber = 0;
       
       try {
