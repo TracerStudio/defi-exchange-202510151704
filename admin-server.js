@@ -318,13 +318,10 @@ app.post('/api/sync-balances', apiLimiter, (req, res) => {
     
     // Атомарно оновлюємо всі баланси в базі даних
     try {
-      const transaction = dbManager.db.transaction(() => {
-        Object.entries(balances).forEach(([token, amount]) => {
-          dbManager.updateBalance(userAddress, token, parseFloat(amount), 'set');
-        });
+      // Просто оновлюємо баланси без транзакції
+      Object.entries(balances).forEach(([token, amount]) => {
+        dbManager.updateBalance(userAddress, token, parseFloat(amount), 'set');
       });
-      
-      transaction();
       console.log(`✅ Successfully synced balances for ${userAddress}`);
     } catch (dbError) {
       console.error('❌ Database error during sync:', dbError);
