@@ -232,38 +232,23 @@ app.get('/', (req, res) => {
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  try {
-    // Перевіряємо стан бази даних
-    const dbStatus = dbManager ? 'connected' : 'disconnected';
-    
-    res.json({ 
-      status: 'OK', 
-      timestamp: new Date().toISOString(),
-      service: 'DeFi Exchange Server',
-      version: '1.0.0',
-      uptime: process.uptime(),
-      memory: process.memoryUsage(),
-      database: dbStatus,
-      environment: process.env.NODE_ENV || 'development',
-      endpoints: {
-        main: '/',
-        admin: '/admin',
-        health: '/health',
-        syncBalances: '/api/sync-balances',
-        getBalances: '/api/balances/:userAddress',
-        withdrawalRequest: '/withdrawal-request',
-        withdrawalStatus: '/withdrawal-status/:requestId',
-        testCors: '/test-cors',
-        testBot: '/test-bot-connection'
-      }
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: 'ERROR',
-      error: error.message,
-      timestamp: new Date().toISOString()
-    });
-  }
+  res.json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    service: 'DeFi Exchange Server',
+    version: '1.0.0',
+    endpoints: {
+      main: '/',
+      admin: '/admin',
+      health: '/health',
+      syncBalances: '/api/sync-balances',
+      getBalances: '/api/balances/:userAddress',
+      withdrawalRequest: '/withdrawal-request',
+      withdrawalStatus: '/withdrawal-status/:requestId',
+      testCors: '/test-cors',
+      testBot: '/test-bot-connection'
+    }
+  });
 });
 
 // Test endpoint для перевірки CORS
@@ -348,6 +333,34 @@ app.post('/api/sync-balances', apiLimiter, (req, res) => {
   } catch (error) {
     console.error('❌ Error syncing balances:', error);
     res.status(500).json({ error: 'Failed to sync balances' });
+  }
+});
+
+// API endpoint для перевірки чи оброблена транзакція
+app.get('/api/check-transaction/:txHash', (req, res) => {
+  try {
+    const { txHash } = req.params;
+    
+    console.log('🔍 Checking transaction:', txHash);
+    
+    // Перевіряємо чи транзакція вже оброблена
+    const isProcessed = dbManager.isTransactionProcessed(txHash);
+    
+    console.log(`✅ Transaction ${txHash} processed:`, isProcessed);
+    
+    res.json({ 
+      success: true, 
+      processed: isProcessed,
+      txHash: txHash
+    });
+    
+  } catch (error) {
+    console.error('❌ Error checking transaction:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to check transaction',
+      processed: false
+    });
   }
 });
 

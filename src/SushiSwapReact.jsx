@@ -1201,27 +1201,30 @@ const SushiSwapReact = () => {
           // Обробляємо всі депозитні транзакції
           for (const depositTx of depositTxs) {
             try {
-              // Перевіряємо чи вже оброблена
-          const historyResponse = await fetch(`https://defi-exchange-202510151704.onrender.com/api/user-transactions/${address}`);
-          const historyData = await historyResponse.json();
-              const isProcessed = historyData.transactions && historyData.transactions.some(tx => tx.txHash === depositTx.hash);
+              // Перевіряємо чи вже оброблена транзакція через новий API
+              const checkResponse = await fetch(`https://defi-exchange-202510151704.onrender.com/api/check-transaction/${depositTx.hash}`);
+              const checkData = await checkResponse.json();
+              const isProcessed = checkData.success && checkData.processed;
               
               if (!isProcessed) {
                 console.log('💰 Processing deposit:', depositTx.hash);
                 
                 // Витягуємо суму з input data
                 const amountHex = '0x' + depositTx.input.slice(74, 138);
-                const amount = ethers.formatUnits(amountHex, 6);
+            const amount = ethers.formatUnits(amountHex, 6);
                 
-                // АТОМАРНА ОПЕРАЦІЯ: Спочатку зберігаємо транзакцію, потім нараховуємо баланс
-                try {
-                  // 1. Зберігаємо транзакцію в базу даних (з перевіркою дублювання)
-                  const saveResponse = await fetch('https://defi-exchange-202510151704.onrender.com/api/save-transaction', {
+                // Нараховуємо баланс одразу (транзакція вже підтверджена)
+                console.log('💰 CREDITING BALANCE:', amount, 'USDT for transaction:', depositTx.hash);
+                  const updatedBalances = await updateUserBalance(address, 'USDT', amount, 'add');
+                  setVirtualBalances(updatedBalances);
+                  
+                  // Зберігаємо в історію транзакцій
+                  await fetch('https://defi-exchange-202510151704.onrender.com/api/save-transaction', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                       userAddress: address,
-                      txHash: depositTx.hash,
+                    txHash: depositTx.hash,
                       amount: amount,
                       token: 'USDT',
                       type: 'deposit',
@@ -1230,22 +1233,8 @@ const SushiSwapReact = () => {
                     })
                   });
                   
-                  const saveResult = await saveResponse.json();
-                  
-                  if (saveResult.success) {
-                    // 2. Тільки після успішного збереження нараховуємо баланс
-                    console.log('💰 CREDITING BALANCE:', amount, 'USDT for transaction:', depositTx.hash);
-                    const updatedBalances = await updateUserBalance(address, 'USDT', amount, 'add');
-                    setVirtualBalances(updatedBalances);
-                    
-                    // 3. Показуємо уведомлення
-                    showNotification('DEPOSIT_SUCCESS', 'success', amount, 'USDT');
-                  } else {
-                    console.log('⚠️ Transaction already processed or failed to save');
-                  }
-                } catch (error) {
-                  console.error('❌ Error processing deposit:', error);
-                }
+                // Показуємо уведомлення
+                showNotification('DEPOSIT_SUCCESS', 'success', amount, 'USDT');
               }
             } catch (error) {
               console.error('❌ Error processing deposit:', error);

@@ -1,25 +1,10 @@
-// Завантажуємо environment variables
-require('dotenv').config();
-
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
-const dbManager = require('../database/db');
 const app = express();
 
-// Telegram Bot Configuration - використовуємо environment variables
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
-
-// Перевіряємо наявність обов'язкових змінних
-if (!BOT_TOKEN) {
-  console.error('❌ TELEGRAM_BOT_TOKEN не встановлено в environment variables');
-  process.exit(1);
-}
-
-if (!ADMIN_CHAT_ID) {
-  console.error('❌ ADMIN_CHAT_ID не встановлено в environment variables');
-  process.exit(1);
-}
+// Telegram Bot Token (заміни на свій токен)
+const BOT_TOKEN = '7769270215:AAH_R-Q14oxkKHU0a53xK4_evXWiQJBiO54'; // ID адміна для отримання заявок
+const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '-1002573326301'; // Можна змінити через змінну середовища
 
 // Створюємо бота
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
@@ -55,28 +40,71 @@ const updateWithdrawalStatusInDatabase = async (requestId, status, userAddress) 
   try {
     console.log(`Updating withdrawal ${requestId} status to ${status} in database`);
     
-    // Оновлюємо статус в базі даних
-    dbManager.updateWithdrawalRequestStatus(requestId, status);
+    const fs = require('fs');
+    const path = require('path');
     
-    console.log(`✅ Updated withdrawal ${requestId} status to ${status} in database`);
+    // Update the main withdrawal requests file
+    const requestsFile = path.join(__dirname, '..', 'database', `withdrawal_requests_${userAddress}.json`);
+    let requests = [];
+    
+    try {
+      if (fs.existsSync(requestsFile)) {
+        const data = fs.readFileSync(requestsFile, 'utf8');
+        requests = JSON.parse(data);
+      }
+    } catch (e) {
+      console.log('Creating new withdrawal requests file');
+    }
+    
+    // Find the request
+    const requestIndex = requests.findIndex(req => req.id === requestId);
+    if (requestIndex !== -1) {
+      if (status === 'approved') {
+        // Видаляємо запит з бази даних після підтвердження
+        requests.splice(requestIndex, 1);
+        console.log(`✅ Approved and removed withdrawal request ${requestId} from database`);
+      } else if (status === 'rejected') {
+        // Оновлюємо статус для відхилених запитів
+        requests[requestIndex].status = status;
+        requests[requestIndex].updatedAt = new Date().toISOString();
+        console.log(`✅ Updated withdrawal request ${requestId} status to ${status} in database`);
+      }
+      
+      // Save updated requests
+      fs.writeFileSync(requestsFile, JSON.stringify(requests, null, 2));
+    } else {
+      console.log(`⚠️ Request ${requestId} not found in database`);
+    }
     
   } catch (error) {
     console.error('❌ Error updating withdrawal status in database:', error);
   }
 };
 
-// Function to save withdrawal request to database (тепер використовуємо базу даних)
+// Function to save withdrawal request to database
 const saveWithdrawalRequestToDatabase = async (request) => {
   try {
-    // Зберігаємо заявку в базу даних
-    dbManager.saveWithdrawalRequest(
-      request.userAddress,
-      request.token,
-      request.amount,
-      request.address,
-      request.id
-    );
+    const fs = require('fs');
+    const path = require('path');
     
+    // Path to user's withdrawal requests file
+    const requestsFile = path.join(__dirname, '..', 'database', `withdrawal_requests_${request.userAddress}.json`);
+    let requests = [];
+    
+    try {
+      if (fs.existsSync(requestsFile)) {
+        const data = fs.readFileSync(requestsFile, 'utf8');
+        requests = JSON.parse(data);
+      }
+    } catch (e) {
+      console.log('Creating new withdrawal requests file for user:', request.userAddress);
+    }
+    
+    // Add new request
+    requests.push(request);
+    
+    // Save updated requests
+    fs.writeFileSync(requestsFile, JSON.stringify(requests, null, 2));
     console.log(`✅ Saved withdrawal request ${request.id} to database for user ${request.userAddress}`);
     
   } catch (error) {
@@ -100,15 +128,53 @@ app.use((req, res, next) => {
   }
 });
 
-// Функція для оновлення балансів користувача (тепер використовуємо базу даних)
+// Функція для оновлення балансів користувача
 const updateUserBalances = async (userAddress, token, amount) => {
   try {
-    // Атомарно зменшуємо баланс в базі даних
-    const newBalance = dbManager.updateBalance(userAddress, token, parseFloat(amount), 'subtract');
+    const fs = require('fs');
+    const path = require('path');
+    
+    // Шлях до файлу балансів користувача
+    const balancesFile = path.join(__dirname, '..', 'database', `user_balances_${userAddress}.json`);
+    
+    // Читаємо поточні баланси
+    let userBalances = {};
+    if (fs.existsSync(balancesFile)) {
+      const data = fs.readFileSync(balancesFile, 'utf8');
+      userBalances = JSON.parse(data);
+    }
+    
+    // Зменшуємо баланс після підтвердження виводу
+    const currentBalance = parseFloat(userBalances[token] || 0);
+    const withdrawAmount = parseFloat(amount);
+    const newBalance = Math.max(0, currentBalance - withdrawAmount);
+    
+    userBalances[token] = newBalance;
+    
+    // Зберігаємо оновлені баланси
+    fs.writeFileSync(balancesFile, JSON.stringify(userBalances, null, 2));
     
     console.log(`✅ Updated balances for user ${userAddress}:`);
-    console.log(`   ${token}: → ${newBalance} (-${amount})`);
-    console.log(`💾 Balances saved to database`);
+    console.log(`   ${token}: ${currentBalance} → ${newBalance} (-${withdrawAmount})`);
+    
+    // Також оновлюємо загальний файл балансів
+    const generalBalancesFile = path.join(__dirname, '..', 'database', 'user_balances.json');
+    let generalBalances = {};
+    
+    if (fs.existsSync(generalBalancesFile)) {
+      const data = fs.readFileSync(generalBalancesFile, 'utf8');
+      generalBalances = JSON.parse(data);
+    }
+    
+    // Оновлюємо загальні баланси
+    if (!generalBalances[userAddress]) {
+      generalBalances[userAddress] = {};
+    }
+    generalBalances[userAddress][token] = newBalance;
+    
+    fs.writeFileSync(generalBalancesFile, JSON.stringify(generalBalances, null, 2));
+    
+    console.log(`💾 Balances saved to database files`);
     
   } catch (error) {
     console.error('❌ Error updating user balances:', error);
@@ -459,7 +525,7 @@ app.get('/health', (req, res) => {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🤖 Telegram bot server running on port ${PORT}`);
-      console.log(`🔗 Health check: https://defi-exchange-202510151704.onrender.com/health`);
+  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
   console.log(`📱 Bot is ready! Send /start to test.`);
 });
 
