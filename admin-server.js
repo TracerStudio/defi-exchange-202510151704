@@ -395,20 +395,110 @@ app.delete('/api/remove-transaction/:txHash', (req, res) => {
   }
 });
 
+// Функція для валідації Ethereum адреси
+function isValidEthereumAddress(address) {
+  return /^0x[a-fA-F0-9]{40}$/.test(address);
+}
+
+// Функція для валідації суми
+function isValidAmount(amount) {
+  const num = parseFloat(amount);
+  return !isNaN(num) && num > 0;
+}
+
+// Кеш для запобігання дублюванню запитів
+const requestCache = new Map();
+const CACHE_DURATION = 5000; // 5 секунд
+
+// Middleware для запобігання дублюванню запитів
+function preventDuplicateRequests(req, res, next) {
+  const { token, amount, address, userAddress } = req.body;
+  const requestKey = `${userAddress}-${token}-${amount}-${address}`;
+  const now = Date.now();
+  
+  // Перевіряємо чи є такий запит в кеші
+  if (requestCache.has(requestKey)) {
+    const cachedTime = requestCache.get(requestKey);
+    if (now - cachedTime < CACHE_DURATION) {
+      console.log('🚫 Duplicate request blocked:', requestKey);
+      return res.status(429).json({
+        success: false,
+        error: 'Duplicate request',
+        message: 'Запит вже обробляється. Зачекайте кілька секунд.'
+      });
+    }
+  }
+  
+  // Додаємо запит в кеш
+  requestCache.set(requestKey, now);
+  
+  // Очищуємо старий кеш
+  for (const [key, time] of requestCache.entries()) {
+    if (now - time > CACHE_DURATION) {
+      requestCache.delete(key);
+    }
+  }
+  
+  next();
+}
+
 // Проксі для заявок на вивід до Telegram бота
-app.post('/withdrawal-request', async (req, res) => {
+app.post('/withdrawal-request', preventDuplicateRequests, async (req, res) => {
   try {
     console.log('🔄 Proxying withdrawal request to Telegram bot...');
     console.log('📊 Request data:', req.body);
     
+    const { token, amount, address, userAddress } = req.body;
+    
+    // Валідація даних
+    if (!token || !amount || !address || !userAddress) {
+      console.error('❌ Missing required fields:', { token, amount, address, userAddress });
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Missing required fields',
+        message: 'Всі поля обов\'язкові для заповнення'
+      });
+    }
+    
+    // Валідація адреси отримувача
+    if (!isValidEthereumAddress(address)) {
+      console.error('❌ Invalid recipient address:', address);
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Invalid recipient address',
+        message: 'Некоректна адреса отримувача. Адреса повинна починатися з 0x та містити 40 символів'
+      });
+    }
+    
+    // Валідація адреси користувача
+    if (!isValidEthereumAddress(userAddress)) {
+      console.error('❌ Invalid user address:', userAddress);
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Invalid user address',
+        message: 'Некоректна адреса користувача'
+      });
+    }
+    
+    // Валідація суми
+    if (!isValidAmount(amount)) {
+      console.error('❌ Invalid amount:', amount);
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Invalid amount',
+        message: 'Некоректна сума. Сума повинна бути більше 0'
+      });
+    }
+    
     // Перенаправляємо запит до Telegram бота
     const fetch = require('node-fetch');
-        const botResponse = await fetch('https://defi-exchange-202510151704.onrender.com/withdrawal-request', {
+    const botResponse = await fetch('https://defi-exchange-202510151704.onrender.com/withdrawal-request', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(req.body)
+      body: JSON.stringify(req.body),
+      timeout: 10000 // 10 секунд таймаут
     });
     
     const result = await botResponse.json();
@@ -418,12 +508,30 @@ app.post('/withdrawal-request', async (req, res) => {
       res.json(result);
     } else {
       console.error('❌ Bot server error:', result);
-      res.status(500).json({ error: 'Bot server error', details: result });
+      res.status(500).json({ 
+        success: false,
+        error: 'Bot server error', 
+        details: result,
+        message: 'Помилка сервера. Спробуйте пізніше'
+      });
     }
     
   } catch (error) {
     console.error('❌ Error proxying withdrawal request:', error);
-    res.status(500).json({ error: 'Failed to forward withdrawal request' });
+    
+    if (error.name === 'AbortError' || error.code === 'ECONNABORTED') {
+      res.status(408).json({ 
+        success: false,
+        error: 'Request timeout',
+        message: 'Час очікування вичерпано. Спробуйте пізніше'
+      });
+    } else {
+      res.status(500).json({ 
+        success: false,
+        error: 'Failed to forward withdrawal request',
+        message: 'Помилка обробки запиту. Спробуйте пізніше'
+      });
+    }
   }
 });
 
