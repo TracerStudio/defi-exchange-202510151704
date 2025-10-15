@@ -7,8 +7,52 @@ const fs = require('fs');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
+const dbManager = require('./database/db');
 const app = express();
 const PORT = process.env.PORT || 3002;
+
+// Rate Limiting Configuration
+const generalLimiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 хвилин
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // максимум 100 запитів на IP
+  message: {
+    success: false,
+    error: 'Too many requests',
+    message: 'Забагато запитів. Спробуйте пізніше.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  onLimitReached: (req, res, options) => {
+    // Логування буде оновлено пізніше
+    console.log('🚫 Rate limit exceeded for IP:', req.ip);
+  }
+});
+
+// Строгий rate limiting для API endpoints
+const apiLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 хвилин
+  max: 50, // максимум 50 запитів на IP
+  message: {
+    success: false,
+    error: 'API rate limit exceeded',
+    message: 'Перевищено ліміт API запитів. Спробуйте пізніше.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Дуже строгий rate limiting для withdrawal requests
+const withdrawalLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 хвилина
+  max: 5, // максимум 5 запитів на хвилину
+  message: {
+    success: false,
+    error: 'Withdrawal rate limit exceeded',
+    message: 'Перевищено ліміт запитів на виведення. Зачекайте хвилину.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // Функція для логування безпеки
 function logSecurityEvent(event, details, req = null) {
@@ -45,30 +89,25 @@ function logSecurityEvent(event, details, req = null) {
   }
 }
 
-// Функція для оновлення списку активних користувачів
+// Функція для оновлення списку активних користувачів (тепер використовуємо базу даних)
 function updateActiveUsers(userAddress) {
   try {
-    const activeUsersFile = path.join(__dirname, 'database', 'active_users.json');
-    let activeUsers = { users: [], lastUpdated: Date.now(), totalUsers: 0 };
-    
-    if (fs.existsSync(activeUsersFile)) {
-      const data = fs.readFileSync(activeUsersFile, 'utf8');
-      activeUsers = JSON.parse(data);
-    }
-    
-    // Додаємо користувача якщо його ще немає
-    if (!activeUsers.users.includes(userAddress)) {
-      activeUsers.users.push(userAddress);
-      activeUsers.totalUsers = activeUsers.users.length;
-      activeUsers.lastUpdated = Date.now();
-      
-      fs.writeFileSync(activeUsersFile, JSON.stringify(activeUsers, null, 2));
-      console.log(`👤 Added user to active users list: ${userAddress}`);
-    }
+    // Користувач автоматично додається в базу даних при першому зверненні
+    console.log(`👤 User activity recorded: ${userAddress}`);
   } catch (error) {
     console.error('❌ Error updating active users:', error);
   }
 }
+
+// Оновлюємо onLimitReached callback для generalLimiter
+generalLimiter.onLimitReached = (req, res, options) => {
+  logSecurityEvent('RATE_LIMIT_EXCEEDED', {
+    ip: req.ip,
+    userAgent: req.headers['user-agent'],
+    endpoint: req.path,
+    severity: 'warning'
+  }, req);
+};
 
 // Застосовуємо Helmet для безпеки
 app.use(helmet({
@@ -240,7 +279,7 @@ app.get('/test-bot-connection', async (req, res) => {
   }
 });
 
-// API для синхронізації балансів між пристроями
+// API для синхронізації балансів між пристроями (тепер використовуємо базу даних)
 app.post('/api/sync-balances', apiLimiter, (req, res) => {
   try {
     const { userAddress, balances } = req.body;
@@ -256,16 +295,14 @@ app.post('/api/sync-balances', apiLimiter, (req, res) => {
       return res.status(400).json({ error: 'Missing userAddress or balances' });
     }
     
-    // Створюємо директорію database якщо не існує
-    const databaseDir = path.join(__dirname, 'database');
-    if (!fs.existsSync(databaseDir)) {
-      fs.mkdirSync(databaseDir, { recursive: true });
-      console.log('📁 Created database directory');
-    }
+    // Атомарно оновлюємо всі баланси в базі даних
+    const transaction = dbManager.db.transaction(() => {
+      Object.entries(balances).forEach(([token, amount]) => {
+        dbManager.updateBalance(userAddress, token, parseFloat(amount), 'set');
+      });
+    });
     
-    // Зберігаємо баланси в файл
-    const balancesFile = path.join(databaseDir, `user_balances_${userAddress}.json`);
-    fs.writeFileSync(balancesFile, JSON.stringify(balances, null, 2));
+    transaction();
     
     // Оновлюємо список активних користувачів
     updateActiveUsers(userAddress);
@@ -289,16 +326,10 @@ app.get('/api/balances/:userAddress', (req, res) => {
     console.log('🌐 Origin:', req.headers.origin);
     console.log('📊 User Address:', userAddress);
     
-    const balancesFile = path.join(__dirname, 'database', `user_balances_${userAddress}.json`);
-    
-    if (fs.existsSync(balancesFile)) {
-      const balances = JSON.parse(fs.readFileSync(balancesFile, 'utf8'));
-      console.log(`✅ Found balances for ${userAddress}:`, balances);
-      res.json({ success: true, balances });
-    } else {
-      console.log(`❌ No balances file found for ${userAddress}`);
-      res.json({ success: true, balances: {} });
-    }
+    // Отримуємо баланси з бази даних
+    const balances = dbManager.getUserBalances(userAddress);
+    console.log(`✅ Found balances for ${userAddress}:`, balances);
+    res.json({ success: true, balances });
     
   } catch (error) {
     console.error('❌ Error getting balances:', error);
@@ -459,52 +490,7 @@ function isValidAmount(amount) {
 const requestCache = new Map();
 const CACHE_DURATION = 5000; // 5 секунд
 
-// Rate Limiting Configuration
-const generalLimiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 хвилин
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // максимум 100 запитів на IP
-  message: {
-    success: false,
-    error: 'Too many requests',
-    message: 'Забагато запитів. Спробуйте пізніше.'
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-  onLimitReached: (req, res, options) => {
-    logSecurityEvent('RATE_LIMIT_EXCEEDED', {
-      ip: req.ip,
-      userAgent: req.headers['user-agent'],
-      endpoint: req.path,
-      severity: 'warning'
-    }, req);
-  }
-});
-
-// Строгий rate limiting для API endpoints
-const apiLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000, // 5 хвилин
-  max: 50, // максимум 50 запитів на IP
-  message: {
-    success: false,
-    error: 'API rate limit exceeded',
-    message: 'Перевищено ліміт API запитів. Спробуйте пізніше.'
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-// Дуже строгий rate limiting для withdrawal requests
-const withdrawalLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 хвилина
-  max: 5, // максимум 5 запитів на хвилину
-  message: {
-    success: false,
-    error: 'Withdrawal rate limit exceeded',
-    message: 'Перевищено ліміт запитів на виведення. Зачекайте хвилину.'
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+// Rate limiters вже визначені на початку файлу
 
 // Middleware для запобігання дублюванню запитів
 function preventDuplicateRequests(req, res, next) {
@@ -674,78 +660,49 @@ app.post('/api/save-transaction', (req, res) => {
   }
   
   try {
-    const transactionData = {
-      userAddress,
-      txHash,
-      amount,
-      token,
-      type,
-      status,
-      timestamp: timestamp || Date.now()
-    };
-    
-    // Зберігаємо в файл історії транзакцій
-    const historyFile = path.join(__dirname, 'database', `user_transactions_${userAddress}.json`);
-    
-    let transactions = [];
-    if (fs.existsSync(historyFile)) {
-      const data = fs.readFileSync(historyFile, 'utf8');
-      transactions = JSON.parse(data);
-    }
-    
     // Перевіряємо чи транзакція вже існує
-    const existingIndex = transactions.findIndex(tx => tx.txHash === txHash);
-    if (existingIndex !== -1) {
-      // Оновлюємо існуючу транзакцію
-      transactions[existingIndex] = transactionData;
-      console.log(`🔄 Updated transaction in history: ${txHash}`);
-    } else {
-      // Додаємо нову транзакцію
-      transactions.push(transactionData);
-      console.log(`✅ Added transaction to history: ${txHash}`);
+    if (dbManager.isTransactionProcessed(txHash)) {
+      console.log(`⚠️ Transaction ${txHash} already processed`);
+      return res.json({ 
+        success: true, 
+        message: 'Transaction already exists' 
+      });
     }
     
-    fs.writeFileSync(historyFile, JSON.stringify(transactions, null, 2));
+    // Зберігаємо транзакцію в базу даних
+    dbManager.saveTransaction(userAddress, txHash, token, parseFloat(amount), type, status);
     
     // Оновлюємо список активних користувачів
     updateActiveUsers(userAddress);
     
+    console.log(`✅ Saved transaction ${txHash} for user ${userAddress}`);
     res.json({ 
       success: true, 
-      message: 'Transaction saved to history',
-      transaction: transactionData
+      message: 'Transaction saved to database',
+      transaction: { userAddress, txHash, amount, token, type, status }
     });
     
   } catch (error) {
-    console.error('❌ Error saving transaction to history:', error);
+    console.error('❌ Error saving transaction to database:', error);
     res.status(500).json({ 
       success: false, 
-      error: 'Failed to save transaction to history' 
+      error: 'Failed to save transaction to database' 
     });
   }
 });
 
-// API для отримання історії транзакцій користувача
+// API для отримання історії транзакцій користувача (тепер використовуємо базу даних)
 app.get('/api/user-transactions/:userAddress', (req, res) => {
   const { userAddress } = req.params;
   
   try {
-    const historyFile = path.join(__dirname, 'database', `user_transactions_${userAddress}.json`);
+    // Отримуємо транзакції з бази даних
+    const transactions = dbManager.getUserTransactions(userAddress);
     
-    if (fs.existsSync(historyFile)) {
-      const data = fs.readFileSync(historyFile, 'utf8');
-      const transactions = JSON.parse(data);
-      
-      res.json({ 
-        success: true, 
-        transactions: transactions 
-      });
-    } else {
-      res.json({ 
-        success: true, 
-        transactions: [] 
-      });
-    }
+    res.json({ 
+      success: true, 
+      transactions: transactions 
+    });
     
   } catch (error) {
     console.error('❌ Error loading user transactions:', error);
@@ -756,27 +713,18 @@ app.get('/api/user-transactions/:userAddress', (req, res) => {
   }
 });
 
-// API для отримання заявок на вивід користувача
+// API для отримання заявок на вивід користувача (тепер використовуємо базу даних)
 app.get('/api/withdrawal-requests/:userAddress', (req, res) => {
   const { userAddress } = req.params;
   
   try {
-    const requestsFile = path.join(__dirname, 'database', `withdrawal_requests_${userAddress}.json`);
+    // Отримуємо заявки з бази даних
+    const requests = dbManager.getWithdrawalRequests(userAddress);
     
-    if (fs.existsSync(requestsFile)) {
-      const data = fs.readFileSync(requestsFile, 'utf8');
-      const requests = JSON.parse(data);
-      
-      res.json({ 
-        success: true, 
-        requests: requests 
-      });
-    } else {
-      res.json({ 
-        success: true, 
-        requests: [] 
-      });
-    }
+    res.json({ 
+      success: true, 
+      requests: requests 
+    });
     
   } catch (error) {
     console.error('❌ Error loading withdrawal requests:', error);
