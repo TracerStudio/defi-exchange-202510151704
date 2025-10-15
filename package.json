@@ -18,7 +18,8 @@
     "dev": "concurrently \"npm run admin\" \"npm run bot\" \"npm start\"",
     "dev:full": "concurrently \"npm run admin\" \"npm run bot\" \"npm start\" --names \"ADMIN,BOT,FRONTEND\" --prefix-colors \"blue,green,yellow\"",
     "start:all": "node start.js",
-    "start:full": "node start.js"
+    "start:full": "node start.js",
+    "start:prod": "node admin-server.js"
   },
   "dependencies": {
     "@reown/appkit": "^1.8.9",
