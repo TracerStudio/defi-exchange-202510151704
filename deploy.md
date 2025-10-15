@@ -11,8 +11,8 @@ git add .
 # Зробити коміт
 git commit -m "Initial commit - DeFi Exchange Platform"
 
-# Додати remote репозиторій (замініть на ваш URL)
-git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
+# Додати remote репозиторій
+git remote add origin https://github.com/TracerStudio/defi-exchange-202510151704.git
 
 # Запушити на GitHub
 git push -u origin main
