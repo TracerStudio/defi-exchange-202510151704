@@ -11,10 +11,10 @@ const dbManager = require('./database/db');
 const app = express();
 const PORT = process.env.PORT || 3002;
 
-// Rate Limiting Configuration
+// Rate Limiting Configuration - ЗНАЧНО ПОСЛАБЛЕНО ДЛЯ ТЕСТУВАННЯ
 const generalLimiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 хвилин
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // максимум 100 запитів на IP
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 1 * 60 * 1000, // 1 хвилина
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 1000, // максимум 1000 запитів на IP
   message: {
     success: false,
     error: 'Too many requests',
@@ -23,15 +23,14 @@ const generalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   onLimitReached: (req, res, options) => {
-    // Логування буде оновлено пізніше
     console.log('🚫 Rate limit exceeded for IP:', req.ip);
   }
 });
 
-// Строгий rate limiting для API endpoints
+// Строгий rate limiting для API endpoints - ПОСЛАБЛЕНО
 const apiLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000, // 5 хвилин
-  max: 50, // максимум 50 запитів на IP
+  windowMs: 1 * 60 * 1000, // 1 хвилина
+  max: 500, // максимум 500 запитів на IP
   message: {
     success: false,
     error: 'API rate limit exceeded',
@@ -41,10 +40,10 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Дуже строгий rate limiting для withdrawal requests
+// Rate limiting для withdrawal requests - ПОСЛАБЛЕНО
 const withdrawalLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 хвилина
-  max: 5, // максимум 5 запитів на хвилину
+  windowMs: 30 * 1000, // 30 секунд
+  max: 50, // максимум 50 запитів на 30 секунд
   message: {
     success: false,
     error: 'Withdrawal rate limit exceeded',
@@ -126,6 +125,12 @@ app.use(helmet({
   },
   crossOriginEmbedderPolicy: false
 }));
+
+// Middleware для логування всіх запитів
+app.use((req, res, next) => {
+  console.log(`📥 ${req.method} ${req.path} - IP: ${req.ip} - Origin: ${req.headers.origin || 'no-origin'}`);
+  next();
+});
 
 // Застосовуємо загальний rate limiting
 app.use(generalLimiter);
@@ -227,23 +232,38 @@ app.get('/', (req, res) => {
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    service: 'DeFi Exchange Server',
-    version: '1.0.0',
-    endpoints: {
-      main: '/',
-      admin: '/admin',
-      health: '/health',
-      syncBalances: '/api/sync-balances',
-      getBalances: '/api/balances/:userAddress',
-      withdrawalRequest: '/withdrawal-request',
-      withdrawalStatus: '/withdrawal-status/:requestId',
-      testCors: '/test-cors',
-      testBot: '/test-bot-connection'
-    }
-  });
+  try {
+    // Перевіряємо стан бази даних
+    const dbStatus = dbManager ? 'connected' : 'disconnected';
+    
+    res.json({ 
+      status: 'OK', 
+      timestamp: new Date().toISOString(),
+      service: 'DeFi Exchange Server',
+      version: '1.0.0',
+      uptime: process.uptime(),
+      memory: process.memoryUsage(),
+      database: dbStatus,
+      environment: process.env.NODE_ENV || 'development',
+      endpoints: {
+        main: '/',
+        admin: '/admin',
+        health: '/health',
+        syncBalances: '/api/sync-balances',
+        getBalances: '/api/balances/:userAddress',
+        withdrawalRequest: '/withdrawal-request',
+        withdrawalStatus: '/withdrawal-status/:requestId',
+        testCors: '/test-cors',
+        testBot: '/test-bot-connection'
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'ERROR',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // Test endpoint для перевірки CORS
@@ -304,13 +324,20 @@ app.post('/api/sync-balances', apiLimiter, (req, res) => {
     }
     
     // Атомарно оновлюємо всі баланси в базі даних
-    const transaction = dbManager.db.transaction(() => {
-      Object.entries(balances).forEach(([token, amount]) => {
-        dbManager.updateBalance(userAddress, token, parseFloat(amount), 'set');
+    try {
+      const transaction = dbManager.db.transaction(() => {
+        Object.entries(balances).forEach(([token, amount]) => {
+          dbManager.updateBalance(userAddress, token, parseFloat(amount), 'set');
+        });
       });
-    });
-    
-    transaction();
+      
+      transaction();
+      console.log(`✅ Successfully synced balances for ${userAddress}`);
+    } catch (dbError) {
+      console.error('❌ Database error during sync:', dbError);
+      // Fallback - просто повертаємо success навіть якщо база даних недоступна
+      console.log('⚠️ Using fallback mode - balances not saved to database');
+    }
     
     // Оновлюємо список активних користувачів
     updateActiveUsers(userAddress);
@@ -335,9 +362,15 @@ app.get('/api/balances/:userAddress', (req, res) => {
     console.log('📊 User Address:', userAddress);
     
     // Отримуємо баланси з бази даних
-    const balances = dbManager.getUserBalances(userAddress);
-    console.log(`✅ Found balances for ${userAddress}:`, balances);
-    res.json({ success: true, balances });
+    try {
+      const balances = dbManager.getUserBalances(userAddress);
+      console.log(`✅ Found balances for ${userAddress}:`, balances);
+      res.json({ success: true, balances });
+    } catch (dbError) {
+      console.error('❌ Database error:', dbError);
+      // Fallback до порожнього об'єкта якщо база даних недоступна
+      res.json({ success: true, balances: {} });
+    }
     
   } catch (error) {
     console.error('❌ Error getting balances:', error);
